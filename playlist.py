@@ -62,13 +62,32 @@ class Playlist():
         track_position = 1
 
         for song in playlist:
-            track = song["track"]
-            name = track["name"]
-            # artist_list = track["artists"]
-            album = track["album"]["name"]
-            track_id = track["id"]
-            # track popularity
-            track_pop = track["popularity"]
+            try:
+                track = song["track"]
+            except:
+                track = None
+            
+            try:
+                name = track["name"]
+            except:
+                name = None
+
+            try:
+                # artist_list = track["artists"]
+                album = track["album"]["name"]
+            except:
+                album = None
+
+            try:    
+                track_id = track["id"]
+            except:
+                track_id = None
+
+            try:
+                # track popularity
+                track_pop = track["popularity"]
+            except:
+                track_pop = None
             
             # some songs have more than 1 artist
             # create a list of all artists on the song
@@ -82,18 +101,19 @@ class Playlist():
             # artist_genres = [self.sp.artist(artist_id)["genres"] for artist_id in artist_id_list]
             # artist_genres = [*set([item for sublist in artist_genres for item in sublist])]
 
-            # to get only one artist per song, get the artist from the ALBUM
-            album_artist_list = track["album"]['artists']
-            artist = album_artist_list[0]["name"]
-            artist_id = album_artist_list[0]["id"]
+            if track_id != None:
+                # to get only one artist per song, get the artist from the ALBUM
+                album_artist_list = track["album"]['artists']
+                artist = album_artist_list[0]["name"]
+                artist_id = album_artist_list[0]["id"]
 
-            # get genres for this artist and put into a list to be processed later
-            artist_genres = self.sp.artist(artist_id)["genres"]
-            if len(artist_genres) == 0:
-                artist_genres =['unknown']
-            else:
-                artist_genres = ",".join([re.sub(' ','_',i) for i in artist_genres])
-                artist_genres = list(artist_genres.split(','))
+                # get genres for this artist and put into a list to be processed later
+                artist_genres = self.sp.artist(artist_id)["genres"]
+                if len(artist_genres) == 0:
+                    artist_genres =['unknown']
+                else:
+                    artist_genres = ",".join([re.sub(' ','_',i) for i in artist_genres])
+                    artist_genres = list(artist_genres.split(','))
 
             # if track_id == None that means that the audio features for this song could not be found
             # the track is omitted from analysis & use when creating a new playlist
