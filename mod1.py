@@ -1,13 +1,11 @@
 #IMPORTS
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import re
 import spotipy
 import playlist
 import config
 import time
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import pairwise
 from spotipy.oauth2 import SpotifyOAuth
 
 #create spotipy object to interact with spotify web API
@@ -27,23 +25,11 @@ def get_user_playlist():
     - playlist_url: link to user provided playlist
     - playlist_len: the desired length of the generated playlist'''
     
-    ask = True
-    playlist_len = 0
-
     playlist_url = input('Enter a link to a Spotify playlist:')
-    
-    #make sure that desired length is actually an integer
-    while ask==True:
-        try:
-            playlist_len = int(input('How long would you like your final playlist to be? (please enter an integer):'))
-            ask = False
-        except:
-            print('Please be sure to use an INTEGER when specifying how long you woant your final playlist to be.')
         
-    return (playlist_url, playlist_len)
+    return playlist_url
 
-
-def artist_search_results(artist_list):
+def artist_search_results(artist_list, artist_id_list):
     '''Searches Spotify for songs by artists that are in artist_list
         -------------------------------------------
         parameters:
@@ -56,94 +42,46 @@ def artist_search_results(artist_list):
                       'track_id': Top 50 song ids in artist search results}'''
                       
     artist_search_res = {}
+    num_artists = len(artist_list)
 
-    for artist in artist_list:
+    for i in range(0, num_artists):
+
+        artist = artist_list[i]
+        artist_id = artist_id_list[i]
         
         song_names = []
         song_ids = []
+        song_popularity = []
+        song_genres = []
 
         #search spotify for artist name
         result = sp.search(artist, type=['track'], limit = 50)
+
+        artist_genres = sp.artist(artist_id)["genres"]
+        if len(artist_genres) == 0:
+                artist_genres =['unkown']
+        else:
+            artist_genres = ",".join([re.sub(' ','_',i) for i in artist_genres])
+            artist_genres = list(artist_genres.split(','))
+        # artist_genres = [*set([item for sublist in artist_genres for item in sublist])]
 
         #add the song and its id to list of songs & list of song ids
         for song in result['tracks']['items']:
             song_names.append(song['name'])
             song_ids.append(song['id'])
+            song_popularity.append(song['popularity'])
+            song_genres.append(artist_genres)
+        
             
         d = {'track':song_names,
-            'track_id':song_ids}
+            'track_id':song_ids,
+            'popularity' : song_popularity,
+            'genres' : song_genres}
         songs_search_res = pd.DataFrame(d, index=None)
 
         artist_search_res[artist] = songs_search_res
 
     return artist_search_res
-
-def knn_search(instance, data, K, measure):
-    """ find K nearest neighbors of an instance x among the instances in D 
-    -------------------------------------------
-    parameters:
-    - instance: vector used to compare data against
-    - data: vector to search through for K neighbors
-    - K: number of neighbors to find
-    - measure: simlarity measure
-    -------------------------------------------
-    returns:
-    - idx[:K]: the index of the first K most similar records to isntance in data
-    - dists: similarities of rows in data to instance"""
-
-    n_songs = data.shape[0]
-    sims = []
-    for j in range(0,n_songs) :
-        try:
-            sims.append(measure(np.array(instance).reshape(1, -1), np.array(data)[j,:].reshape(1, -1)))
-        except Exception as e:
-            # depending on measure() there can be NaN values generated
-            # still not qute sure why/how they are generated
-            # print(e)
-            sims.append([[-1]])
-            
-    sims = [x[0][0] for x in sims]
-    idx = np.argsort(sims)[::-1] # sorting in descending order bc were dealing with similarity
-    
-    # return the indexes of K most similar neighbors
-    return idx[:K], sims
-
-def get_recommendations(search_res, comparison_values, k=5):
-    '''Get song song recommendations for a list of artists
-       -------------------------------------------
-       parameters:
-       - search_res: a dictionary of artists & artist search result songs
-       - comparison_values: values used for comparison in knn search
-       - k: number of neighbors to find in KNN search. (default = 5)
-       -------------------------------------------
-       returns:
-       - recommended_songs: DataFrame containing Artists, their k most similar songs (from search result) & accompanying info, and similarity to comparison_values'''
-
-    recommended_songs = pd.DataFrame(index=None, columns=['artist', 'track', 'track_id', 'similarity'])
-
-    # iterate over artists & their songs
-    for key in search_res.keys():
-        songs_search_res = search_res[key]
-        
-        # get audio features for all of the artists songs from search
-        search_res_audio_features = playlist1.get_audio_features(songs_search_res)
-        
-        # scale audio features
-        # minmax scaling used instead of standardscaler to make values between 0 nd 1
-        scaled_search_res_audio_features = playlist1.normalize_audio_features(MinMaxScaler, search_res_audio_features)
-        scaled_audio_features =  np.array(scaled_search_res_audio_features)
-            
-        # KNN search for k most similar songs from search results
-        idxs, sims = knn_search(comparison_values, scaled_audio_features, k, pairwise.cosine_similarity)
-        
-        # add all songs to recommended songs DF
-        tmp = pd.DataFrame({'artist': key,
-            'track' : songs_search_res.iloc[idxs,:].track,
-            'track_id' : songs_search_res.iloc[idxs,:].track_id,
-            'similarity' : [sims[x] for x in idxs]}, index=None)
-        recommended_songs = pd.concat([recommended_songs, tmp], axis=0, ignore_index=True)
-
-    return recommended_songs
 
 def get_playlist_id(playlist_name, spotify):
     '''Return playlist ID of playlist_name
@@ -162,7 +100,7 @@ def get_playlist_id(playlist_name, spotify):
             print(playlist.keys())
             return playlist['id']
 
-def build_playlist(tracks, playlist_id, final_len, spotify):
+def build_playlist(tracks, playlist_id, spotify):
     '''Uses the spotify API to put songs onto a new playlist
        -------------------------------------------
        parameters: 
@@ -177,12 +115,12 @@ def build_playlist(tracks, playlist_id, final_len, spotify):
     #add tracks to playlist
     spotify.user_playlist_add_tracks(user_id, playlist_id, tracks.track_id)
     
-def create_new_playlist(recs, playlist_length):
+def create_new_playlist(recs):
     '''Creates a new playlist by sorting recommendations in descending order by distance & choosing the first playlist_length songs
        -------------------------------------------
        paremeters:
        - recs: recommended songs dictionary
-       - playlist_length: desired length of recommended playlist'''
+    '''
     
     # authorization
     SCOPE = "playlist-modify-public"
@@ -191,10 +129,19 @@ def create_new_playlist(recs, playlist_length):
                                                    client_secret=config.SPOTIFY_SECRET,
                                                    redirect_uri=config.REDIRECT_URI)
                         )
+
+    ask = True
+    #make sure that desired length is actually an integer
+    while ask==True:
+        try:
+            playlist_len = int(input('How long would you like your final playlist to be? (please enter an integer):'))
+            ask = False
+        except:
+            print('Please be sure to use an INTEGER when specifying how long you woant your final playlist to be.')
     
     # sort recs based on similarity & grab as many as are wanted in the final playlist
     recs = recs.sort_values(by='similarity', ascending=False)
-    rec_tracks_idx = recs.index[:final_playlist_len, ]
+    rec_tracks_idx = recs.index[:playlist_len, ]
     recommendations = recs.loc[rec_tracks_idx, :]
 
     # ask the user if they want to name the playlist & change its description
@@ -211,22 +158,25 @@ def create_new_playlist(recs, playlist_length):
         
     # build the playlist
     playlist_id = get_playlist_id(name, sp)
-    build_playlist(recommendations, playlist_id, playlist_length, sp)
+    build_playlist(recommendations, playlist_id, sp)
     
     # provide the new playlist URL
     playlist_url = sp.playlist(playlist_id)['external_urls']['spotify']
     print('DONE!')
     print(f'Here is the link to your new playlist: {playlist_url}')
 
+    return playlist_url
 
 
-playlist_link, final_playlist_len = get_user_playlist()
-playlist1 = playlist.Playlist(playlist_link, sp)
-artist_counts, artist_id_counts = playlist1.get_artist_counts() 
-avg_audio_values = pd.DataFrame(playlist1.normalized_audio_features.mean(axis=0))
-artists_search = artist_search_results(artist_counts.columns)
-recs = get_recommendations(artists_search, avg_audio_values, k=5)
-create_new_playlist(recs, final_playlist_len)
+
+# playlist_link = get_user_playlist()
+# playlist_link = 'https://open.spotify.com/playlist/37i9dQZEVXcNDMTzEMNNE1', 10
+# playlist1 = playlist.Playlist(playlist_link, sp)
+# artist_counts, artist_id_counts = playlist1.get_artist_counts() 
+# avg_audio_values = pd.DataFrame(playlist1.normalized_numeric_features.loc[:,0:].mean(axis=0))
+# artists_search = artist_search_results(artist_counts.columns)
+# recs = playlist1.get_recommendations(artists_search, avg_audio_values, k=5)
+# create_new_playlist(recs)
 
 
         
